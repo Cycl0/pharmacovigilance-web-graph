@@ -2,11 +2,10 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   root: './',
-  publicDir: 'src/data',
-  server: {
-    open: true,
-    port: 5173
+  build: {
+    assetsInclude: ["**/*.gexf"], // Explicitly include GEXF files
   },
+  publicDir: "public", // Ensure this points to your public folder
   server: {
     fs: {
       allow: ['..']

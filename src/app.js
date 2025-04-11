@@ -2,7 +2,8 @@ import { Graph } from "graphology";
 import gexf from "graphology-gexf";
 import Sigma from "sigma";
 
-fetch("../data/medicamentos_adrs_usuarios_network.gexf")
+document.addEventListener("DOMContentLoaded", () => {
+fetch("/data/medicamentos_adrs_usuarios_network.gexf")
     .then((response) => response.text())
     .then((gexfString) => {
         // Parse the GEXF file
@@ -176,3 +177,4 @@ fetch("../data/medicamentos_adrs_usuarios_network.gexf")
     .catch(error => {
         console.error("Error loading or rendering graph:", error);
     });
+});
