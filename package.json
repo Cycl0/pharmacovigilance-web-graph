@@ -1,0 +1,17 @@
+{
+  "name": "pharmacovigilance-web-graph",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "graphology": "^0.26.0",
+    "graphology-gexf": "^0.13.2",
+    "sigma": "^3.0.1"
+  },
+  "devDependencies": {
+    "vite": "^4.5.13"
+  }
+}
