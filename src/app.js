@@ -198,7 +198,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Get node attributes
         const attributes = graph.getNodeAttributes(nodeId);
         const nodeName = attributes.label || nodeId;
-        const nodeType = attributes.category ==  "medication" ? "Medication" : "ADR";
+        const nodeType = attributes.category ==  "medication" ? "Medicamento" : "Reação adversa";
 
         // Get connected nodes by type
         const connectedNodesByType = {};
@@ -211,12 +211,12 @@ document.addEventListener("DOMContentLoaded", () => {
         // Build HTML for the info panel
         let infoHTML = `
           <h3>${nodeName}</h3>
-          <p><strong>Type:</strong> ${nodeType}</p>
+          <p><strong>Tipo:</strong> ${nodeType}</p>
         `;
 
         // If there are connected nodes, show breakdown by type
         if (Object.keys(connectedNodesByType).length > 0) {
-          infoHTML += `<p><strong>Connections:</strong></p><ul>`;
+          infoHTML += `<p><strong>Conexões:</strong></p><ul>`;
           for (const [type, count] of Object.entries(connectedNodesByType)) {
             infoHTML += `<li>${type}: ${count}</li>`;
           }
@@ -259,7 +259,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Create label
         const label = document.createElement("div");
-        label.innerText = `Edge visibility threshold: ${topNodePercentage * 100}%`;
+        label.innerText = `Mostrar arestas para os ${topNodePercentage * 100}% principais nós`;
         label.style.marginBottom = "5px";
 
         // Create slider
@@ -274,8 +274,8 @@ document.addEventListener("DOMContentLoaded", () => {
           const newPercentage = parseInt(e.target.value) / 100;
           currentCutoff = calculateCutoff(newPercentage);
 
-          label.innerText = `Edge visibility threshold: ${parseInt(e.target.value)}%`;
-          console.log(`Updated: showing edges only for nodes with degree >= ${currentCutoff} (top ${newPercentage * 100}%)`);
+          label.innerText = `Mostrar arestas para os ${parseInt(e.target.value)}% principais nós`;
+          console.log(`Atualizado: exibindo arestas apenas para nós com grau maior ou igual a ${currentCutoff} (topo ${newPercentage * 100}%)`);
 
           // Force a re-rendering with the new cutoff
           renderer.refresh();
@@ -304,12 +304,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Create search label
         const searchLabel = document.createElement("div");
-        searchLabel.innerText = "Search nodes:";
+        searchLabel.innerText = "Buscar por nó:";
 
         // Create search input
         const searchInput = document.createElement("input");
         searchInput.type = "text";
-        searchInput.placeholder = "Enter node name...";
+        searchInput.placeholder = "Digite o nome do nó";
         searchInput.style.width = "200px";
         searchInput.style.padding = "5px";
 
@@ -338,12 +338,12 @@ document.addEventListener("DOMContentLoaded", () => {
               // If only one result, show detailed connection information
               const nodeId = Array.from(searchResults)[0];
               const connections = graph.degree(nodeId);
-              resultsDisplay.innerHTML = `Found 1 node: <strong>${graph.getNodeAttribute(nodeId, 'label') || nodeId}</strong> with ${connections} connections`;
+              resultsDisplay.innerHTML = `1 nó encontrado: <strong>${graph.getNodeAttribute(nodeId, 'label') || nodeId}</strong> com ${connections} conexões`;
 
               // Update the info panel with this node's details
               updateNodeInfoPanel(nodeId);
             } else {
-              resultsDisplay.innerText = `Found ${searchResults.size} matching nodes`;
+              resultsDisplay.innerText = `${searchResults.size} nós encontrados`;
               updateNodeInfoPanel(null);
             }
           } else {
@@ -356,7 +356,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Add clear button
         const clearButton = document.createElement("button");
-        clearButton.innerText = "Clear";
+        clearButton.innerText = "Limpar busca";
         clearButton.style.marginTop = "5px";
         clearButton.style.padding = "5px";
         clearButton.style.cursor = "pointer";
@@ -382,9 +382,9 @@ document.addEventListener("DOMContentLoaded", () => {
       addCutoffSlider();
       addSearchBox();
 
-      console.log("Sigma visualization rendered successfully");
+      console.log("Visualização Sigma carregada com sucesso");
     })
     .catch(error => {
-      console.error("Error loading or rendering graph:", error);
+      console.error("Erro ao carregar ou exibir o grafo:", error);
     });
 });
