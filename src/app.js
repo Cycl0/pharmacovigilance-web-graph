@@ -57,23 +57,18 @@ document.addEventListener("DOMContentLoaded", () => {
       currentCutoff = calculateCutoff(topNodePercentage);
       console.log(`Initial cutoff: showing edges only for nodes with degree >= ${currentCutoff} (top ${topNodePercentage * 100}%)`);
 
-      // State variables for hover and search highlighting
-      let hoveredNode = null;
+      // State variables for selection and search highlighting
+      let selectedNode = null;
+      let hoveredNode = null; // (keep for search highlight compatibility)
       let searchQuery = "";
       let searchResults = new Set();
 
-      // Create node info display panel
-      const nodeInfoPanel = document.createElement("div");
-      nodeInfoPanel.style.position = "absolute";
-      nodeInfoPanel.style.bottom = "10px";
-      nodeInfoPanel.style.left = "10px";
-      nodeInfoPanel.style.padding = "10px";
-      nodeInfoPanel.style.background = "rgba(255, 255, 255, 0.8)";
-      nodeInfoPanel.style.borderRadius = "5px";
-      nodeInfoPanel.style.boxShadow = "0 0 10px rgba(0,0,0,0.2)";
-      nodeInfoPanel.style.zIndex = "1000";
-      nodeInfoPanel.style.display = "none";
-      document.getElementById("sigma-container").parentNode.appendChild(nodeInfoPanel);
+      // Calculate total mentions for all nodes
+      let totalMentions = 0;
+      graph.forEachNode((nodeId, attributes) => {
+        const mentions = parseInt(attributes.mention_count) || 0;
+        totalMentions += mentions;
+      });
 
       // Create the Sigma instance
       const container = document.getElementById("sigma-container");
@@ -104,17 +99,17 @@ document.addEventListener("DOMContentLoaded", () => {
               defaultColor = "#999";
           }
 
-          // Handle hover and search highlighting
+          // Handle selection and search highlighting
           const isHighlighted =
-            hoveredNode === node ||
-            (hoveredNode !== null && graph.hasEdge(hoveredNode, node)) ||
+            selectedNode === node ||
+            (selectedNode !== null && graph.hasEdge(selectedNode, node)) ||
             searchResults.has(node) ||
             (searchResults.size > 0 &&
               Array.from(searchResults).some(resultNode =>
                 graph.hasEdge(resultNode, node)));
 
-          // If something is hovered/searched and this node isn't highlighted, make it grey
-          if ((hoveredNode !== null || searchResults.size > 0) && !isHighlighted) {
+          // If something is selected/searched and this node isn't highlighted, make it grey
+          if ((selectedNode !== null || searchResults.size > 0) && !isHighlighted) {
             res.color = "#DDDDDD"; // Grey for non-highlighted nodes
             res.zIndex = 0;
           } else {
@@ -125,8 +120,8 @@ document.addEventListener("DOMContentLoaded", () => {
             if (isHighlighted) {
               res.zIndex = 2;
               res.highlighted = true;
-              // Make hovered nodes or search results extra bold
-              if (hoveredNode === node || searchResults.has(node)) {
+              // Make selected nodes or search results extra bold
+              if (selectedNode === node || searchResults.has(node)) {
                 res.size = res.size * 1.5;
                 res.zIndex = 3;
               }
@@ -154,14 +149,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
           // Check if this edge should be highlighted
           const isHighlighted =
-            (hoveredNode !== null &&
-              (hoveredNode === sourceId || hoveredNode === targetId)) ||
+            (selectedNode !== null &&
+              (selectedNode === sourceId || selectedNode === targetId)) ||
             (searchResults.size > 0 &&
               (searchResults.has(sourceId) || searchResults.has(targetId)));
 
           // Use the current cutoff for filtering
           if (sourceDegree >= currentCutoff || targetDegree >= currentCutoff) {
-            if ((hoveredNode !== null || searchResults.size > 0) && !isHighlighted) {
+            if ((selectedNode !== null || searchResults.size > 0) && !isHighlighted) {
               // Grey out non-highlighted edges
               return {
                 ...data,
@@ -188,56 +183,158 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
-      // Update node info panel on hover
-      function updateNodeInfoPanel(nodeId) {
-        if (!nodeId) {
-          nodeInfoPanel.style.display = "none";
-          return;
-        }
+      // Create dashboard panel (bottom right)
+      const dashboardPanel = document.createElement("div");
+      dashboardPanel.style.position = "absolute";
+      dashboardPanel.style.bottom = "10px";
+      dashboardPanel.style.right = "10px";
+      dashboardPanel.style.padding = "15px";
+      dashboardPanel.style.background = "rgba(255,255,255,0.95)";
+      dashboardPanel.style.borderRadius = "8px";
+      dashboardPanel.style.boxShadow = "0 0 12px rgba(0,0,0,0.18)";
+      dashboardPanel.style.zIndex = "1001";
+      dashboardPanel.style.minWidth = "320px";
+      dashboardPanel.style.display = "none";
+      container.parentNode.appendChild(dashboardPanel);
 
-        // Get node attributes
-        const attributes = graph.getNodeAttributes(nodeId);
-        const nodeName = attributes.label || nodeId;
-        const nodeType = attributes.category ==  "medication" ? "Medicamento" : "Reação adversa";
+      // Build a sorted list of all nodes for the menu
+      const allNodes = graph.nodes().map(nodeId => {
+        const attrs = graph.getNodeAttributes(nodeId);
+        return {
+          id: nodeId,
+          label: attrs.label || nodeId,
+          category: attrs.category || ""
+        };
+      }).sort((a, b) => a.label.localeCompare(b.label));
 
-        // Get connected nodes by type
-        const connectedNodesByType = {};
-
-        graph.forEachNeighbor(nodeId, (neighbor, neighborAttributes) => {
-          const neighborType = neighborAttributes.category || "Unknown";
-          connectedNodesByType[neighborType] = (connectedNodesByType[neighborType] || 0) + 1;
+      // Helper to deduplicate posts by category and content
+      function deduplicatePosts(posts) {
+        const seen = new Set();
+        return posts.filter(post => {
+          const key = `${post.category}||${post.content}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
         });
-
-        // Build HTML for the info panel
-        let infoHTML = `
-          <h3>${nodeName}</h3>
-          <p><strong>Tipo:</strong> ${nodeType}</p>
-        `;
-
-        // If there are connected nodes, show breakdown by type
-        if (Object.keys(connectedNodesByType).length > 0) {
-          infoHTML += `<p><strong>Conexões:</strong></p><ul>`;
-          for (const [type, count] of Object.entries(connectedNodesByType)) {
-            infoHTML += `<li>${type}: ${count}</li>`;
-          }
-          infoHTML += `</ul>`;
-        }
-
-        // Update and show the panel
-        nodeInfoPanel.innerHTML = infoHTML;
-        nodeInfoPanel.style.display = "block";
       }
 
-      // Set up hover events
-      renderer.on("enterNode", ({ node }) => {
-        hoveredNode = node;
-        updateNodeInfoPanel(node);
+      // Update dashboard panel to handle new posts format and menu logic
+      function updateDashboardPanel(nodeId) {
+        dashboardPanel.innerHTML = "";
+        if (!nodeId) {
+          dashboardPanel.style.display = "none";
+          return;
+        }
+        const attributes = graph.getNodeAttributes(nodeId);
+        const nodeName = attributes.label || nodeId;
+        const mentionCount = parseInt(attributes.mention_count) || 0;
+        let posts = [];
+        if (attributes.posts) {
+          try {
+            posts = attributes.posts.split('|||').map(p => {
+              try {
+                return JSON.parse(p.replace(/&quot;/g, '"'));
+              } catch {
+                return { content: p };
+              }
+            });
+            posts = deduplicatePosts(posts);
+          } catch (e) {
+            posts = [{ content: attributes.posts }];
+          }
+        }
+        const percentage = totalMentions > 0 ? ((mentionCount / totalMentions) * 100).toFixed(2) : "0.00";
+
+        // Helper to normalize strings for robust matching
+        function normalize(str) {
+          return (str || '').toLowerCase().normalize('NFD').replace(/[0-\u036f]/g, '');
+        }
+
+        // Create dropdown menu inside dashboard
+        const menuDiv = document.createElement("div");
+        menuDiv.style.marginBottom = "10px";
+        const menuLabel = document.createElement("label");
+        menuLabel.innerText = "Filtrar por outro medicamento/ADR:";
+        menuLabel.style.marginRight = "8px";
+        const nodeSelect = document.createElement("select");
+        nodeSelect.style.width = "180px";
+        nodeSelect.style.padding = "4px";
+
+        // Only show options that would actually result in posts
+        const clickedAttrs = graph.getNodeAttributes(nodeId);
+        const clickedLabel = clickedAttrs.label || nodeId;
+        const clickedType = clickedAttrs.category; // "medication" or ADR name
+        let validOptions;
+        if (clickedType === "medication") {
+          // Show only ADRs that are mentioned in the posts' category field
+          const adrsMentioned = new Set(posts.map(post => post.category));
+          validOptions = allNodes.filter(n =>
+            n.id !== nodeId &&
+            n.category !== "medication" &&
+            adrsMentioned.has(n.label)
+          );
+        } else {
+          // Show only medications that are mentioned in the posts' category field
+          const medsMentioned = new Set(posts.map(post => post.category));
+          validOptions = allNodes.filter(n =>
+            n.id !== nodeId &&
+            n.category === "medication" &&
+            medsMentioned.has(n.label)
+          );
+        }
+        nodeSelect.innerHTML = `<option value="">(Todos relacionados)</option>` +
+          validOptions.map(n => `<option value="${n.id}">${n.label} (${n.category})</option>`).join("");
+        menuDiv.appendChild(menuLabel);
+        menuDiv.appendChild(nodeSelect);
+
+        nodeSelect.addEventListener("change", () => {
+          renderDashboardContent();
+        });
+
+        function renderDashboardContent() {
+          const selectedId = nodeSelect.value;
+          let filteredPosts;
+          if (selectedId) {
+            const selectedAttrs = graph.getNodeAttributes(selectedId);
+            const selectedLabel = selectedAttrs.label || selectedId;
+            if (clickedType === "medication") {
+              filteredPosts = posts.filter(post => post.category === selectedLabel);
+            } else {
+              filteredPosts = posts.filter(post => post.category === selectedLabel);
+            }
+          } else {
+            filteredPosts = posts;
+          }
+          let html = `
+            <h4 style=\"margin-top:0\">${nodeName}</h4>
+            <p><strong>Menções únicas:</strong> ${posts.length}<br>
+            <strong>Posts exibidos:</strong> ${filteredPosts.length} de ${posts.length}</p>
+            <p><strong>Posts relacionados:</strong></p>
+            <ul style=\"max-height:120px;overflow:auto;padding-left:18px;\">
+              ${filteredPosts.length > 0 ? filteredPosts.map(post => `<li style=\"margin-bottom:6px;\">${post.content}</li>`).join("") : '<li style=\"color:#888\">Nenhum post encontrado para esta combinação.</li>'}
+            </ul>
+          `;
+          dashboardPanel.innerHTML = "";
+          dashboardPanel.appendChild(menuDiv);
+          const contentDiv = document.createElement("div");
+          contentDiv.innerHTML = html;
+          dashboardPanel.appendChild(contentDiv);
+          dashboardPanel.style.display = "block";
+        }
+
+        // Initial render
+        renderDashboardContent();
+      }
+
+      // Sync menu and click selection
+      renderer.on("clickNode", ({ node }) => {
+        selectedNode = node;
+        updateDashboardPanel(node);
         renderer.refresh();
       });
-
-      renderer.on("leaveNode", () => {
-        hoveredNode = null;
-        updateNodeInfoPanel(null);
+      renderer.on("clickStage", () => {
+        selectedNode = null;
+        updateDashboardPanel(null);
         renderer.refresh();
       });
 
@@ -339,16 +436,11 @@ document.addEventListener("DOMContentLoaded", () => {
               const nodeId = Array.from(searchResults)[0];
               const connections = graph.degree(nodeId);
               resultsDisplay.innerHTML = `1 nó encontrado: <strong>${graph.getNodeAttribute(nodeId, 'label') || nodeId}</strong> com ${connections} conexões`;
-
-              // Update the info panel with this node's details
-              updateNodeInfoPanel(nodeId);
             } else {
               resultsDisplay.innerText = `${searchResults.size} nós encontrados`;
-              updateNodeInfoPanel(null);
             }
           } else {
             resultsDisplay.innerText = "";
-            updateNodeInfoPanel(null);
           }
 
           renderer.refresh();
@@ -366,7 +458,6 @@ document.addEventListener("DOMContentLoaded", () => {
           searchQuery = "";
           searchResults.clear();
           resultsDisplay.innerText = "";
-          updateNodeInfoPanel(null);
           renderer.refresh();
         });
 
