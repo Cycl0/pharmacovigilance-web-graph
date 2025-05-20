@@ -99,17 +99,19 @@ document.addEventListener("DOMContentLoaded", () => {
               defaultColor = "#999";
           }
 
-          // Handle selection and search highlighting
+          // Handle selection, hover, and search highlighting
           const isHighlighted =
-            selectedNode === node ||
-            (selectedNode !== null && graph.hasEdge(selectedNode, node)) ||
+            (selectedNode === node ||
+              (selectedNode !== null && graph.hasEdge(selectedNode, node))) ||
+            (hoveredNode === node ||
+              (hoveredNode !== null && graph.hasEdge(hoveredNode, node))) ||
             searchResults.has(node) ||
             (searchResults.size > 0 &&
               Array.from(searchResults).some(resultNode =>
                 graph.hasEdge(resultNode, node)));
 
-          // If something is selected/searched and this node isn't highlighted, make it grey
-          if ((selectedNode !== null || searchResults.size > 0) && !isHighlighted) {
+          // If something is selected/searched/hovered and this node isn't highlighted, make it grey
+          if ((selectedNode !== null || hoveredNode !== null || searchResults.size > 0) && !isHighlighted) {
             res.color = "#DDDDDD"; // Grey for non-highlighted nodes
             res.zIndex = 0;
           } else {
@@ -120,8 +122,8 @@ document.addEventListener("DOMContentLoaded", () => {
             if (isHighlighted) {
               res.zIndex = 2;
               res.highlighted = true;
-              // Make selected nodes or search results extra bold
-              if (selectedNode === node || searchResults.has(node)) {
+              // Make selected, hovered, or search result nodes extra bold
+              if (selectedNode === node || hoveredNode === node || searchResults.has(node)) {
                 res.size = res.size * 1.5;
                 res.zIndex = 3;
               }
@@ -151,12 +153,14 @@ document.addEventListener("DOMContentLoaded", () => {
           const isHighlighted =
             (selectedNode !== null &&
               (selectedNode === sourceId || selectedNode === targetId)) ||
+            (hoveredNode !== null &&
+              (hoveredNode === sourceId || hoveredNode === targetId)) ||
             (searchResults.size > 0 &&
               (searchResults.has(sourceId) || searchResults.has(targetId)));
 
           // Use the current cutoff for filtering
           if (sourceDegree >= currentCutoff || targetDegree >= currentCutoff) {
-            if ((selectedNode !== null || searchResults.size > 0) && !isHighlighted) {
+            if ((selectedNode !== null || hoveredNode !== null || searchResults.size > 0) && !isHighlighted) {
               // Grey out non-highlighted edges
               return {
                 ...data,
@@ -185,16 +189,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Create dashboard panel (bottom right)
       const dashboardPanel = document.createElement("div");
-      dashboardPanel.style.position = "absolute";
-      dashboardPanel.style.bottom = "10px";
-      dashboardPanel.style.right = "10px";
-      dashboardPanel.style.padding = "15px";
-      dashboardPanel.style.background = "rgba(255,255,255,0.95)";
-      dashboardPanel.style.borderRadius = "8px";
-      dashboardPanel.style.boxShadow = "0 0 12px rgba(0,0,0,0.18)";
-      dashboardPanel.style.zIndex = "1001";
-      dashboardPanel.style.minWidth = "320px";
+      dashboardPanel.style.position = "fixed";
+      dashboardPanel.style.top = "0";
+      dashboardPanel.style.left = "0";
+      dashboardPanel.style.width = "100vw";
+      dashboardPanel.style.height = "100vh";
+      dashboardPanel.style.background = "rgba(255,255,255,0.98)";
+      dashboardPanel.style.borderRadius = "0";
+      dashboardPanel.style.boxShadow = "0 0 40px rgba(0,0,0,0.3)";
+      dashboardPanel.style.zIndex = "2000";
+      dashboardPanel.style.minWidth = "unset";
       dashboardPanel.style.display = "none";
+      dashboardPanel.style.overflowY = "auto";
+      dashboardPanel.style.padding = "0";
       container.parentNode.appendChild(dashboardPanel);
 
       // Build a sorted list of all nodes for the menu
@@ -218,6 +225,10 @@ document.addEventListener("DOMContentLoaded", () => {
         });
       }
 
+      // At the top-level scope, before updateDashboardPanel:
+      let selectedCategory = null;
+      let pieChart = null;
+
       // Update dashboard panel to handle new posts format and menu logic
       function updateDashboardPanel(nodeId) {
         dashboardPanel.innerHTML = "";
@@ -231,95 +242,179 @@ document.addEventListener("DOMContentLoaded", () => {
         let posts = [];
         if (attributes.posts) {
           try {
-            posts = attributes.posts.split('|||').map(p => {
-              try {
-                return JSON.parse(p.replace(/&quot;/g, '"'));
-              } catch {
-                return { content: p };
-              }
-            });
-            posts = deduplicatePosts(posts);
+            posts = JSON.parse(attributes.posts.replace(/&quot;/g, '"'));
           } catch (e) {
-            posts = [{ content: attributes.posts }];
+            posts = [];
           }
+          posts = deduplicatePosts(posts);
         }
         const percentage = totalMentions > 0 ? ((mentionCount / totalMentions) * 100).toFixed(2) : "0.00";
 
-        // Helper to normalize strings for robust matching
-        function normalize(str) {
-          return (str || '').toLowerCase().normalize('NFD').replace(/[0-\u036f]/g, '');
+        // Calculate post counts for each category
+        let categoryCounts = {};
+        posts.forEach(post => {
+          if (!post.category) return;
+          categoryCounts[post.category] = (categoryCounts[post.category] || 0) + 1;
+        });
+        const categories = Object.keys(categoryCounts);
+        const counts = categories.map(cat => categoryCounts[cat]);
+        const colors = [
+          "#4B89DC", "#E9573F", "#F6BB42", "#8CC152", "#5D9CEC", "#AC92EC", "#EC87C0", "#AAB2BD", "#FFCE54", "#48CFAD"
+        ];
+
+        // Remove previous pie chart if any
+        let oldCanvas = document.getElementById('pieChartCanvas');
+        if (oldCanvas) oldCanvas.remove();
+        if (pieChart) {
+          pieChart.destroy();
+          pieChart = null;
         }
 
-        // Create dropdown menu inside dashboard
-        const menuDiv = document.createElement("div");
-        menuDiv.style.marginBottom = "10px";
-        const menuLabel = document.createElement("label");
-        menuLabel.innerText = "Filtrar por outro medicamento/ADR:";
-        menuLabel.style.marginRight = "8px";
-        const nodeSelect = document.createElement("select");
-        nodeSelect.style.width = "180px";
-        nodeSelect.style.padding = "4px";
+        // Create canvas for pie chart
+        const pieCanvas = document.createElement('canvas');
+        pieCanvas.id = 'pieChartCanvas';
+        pieCanvas.width = Math.min(window.innerWidth * 0.6, 900);
+        pieCanvas.height = Math.min(window.innerWidth * 0.6, 900);
+        pieCanvas.style.display = 'block';
+        pieCanvas.style.margin = '0 auto 10px auto';
+        dashboardPanel.appendChild(pieCanvas);
 
-        // Only show options that would actually result in posts
-        const clickedAttrs = graph.getNodeAttributes(nodeId);
-        const clickedLabel = clickedAttrs.label || nodeId;
-        const clickedType = clickedAttrs.category; // "medication" or ADR name
-        let validOptions;
-        if (clickedType === "medication") {
-          // Show only ADRs that are mentioned in the posts' category field
-          const adrsMentioned = new Set(posts.map(post => post.category));
-          validOptions = allNodes.filter(n =>
-            n.id !== nodeId &&
-            n.category !== "medication" &&
-            adrsMentioned.has(n.label)
-          );
-        } else {
-          // Show only medications that are mentioned in the posts' category field
-          const medsMentioned = new Set(posts.map(post => post.category));
-          validOptions = allNodes.filter(n =>
-            n.id !== nodeId &&
-            n.category === "medication" &&
-            medsMentioned.has(n.label)
-          );
-        }
-        nodeSelect.innerHTML = `<option value="">(Todos relacionados)</option>` +
-          validOptions.map(n => `<option value="${n.id}">${n.label} (${n.category})</option>`).join("");
-        menuDiv.appendChild(menuLabel);
-        menuDiv.appendChild(nodeSelect);
+        // Add a close button to the modal
+        const closeBtn = document.createElement('button');
+        closeBtn.innerText = 'Fechar';
+        closeBtn.style.position = 'absolute';
+        closeBtn.style.top = '20px';
+        closeBtn.style.right = '30px';
+        closeBtn.style.zIndex = '2100';
+        closeBtn.style.padding = '10px 18px';
+        closeBtn.style.fontSize = '18px';
+        closeBtn.style.background = '#E9573F';
+        closeBtn.style.color = 'white';
+        closeBtn.style.border = 'none';
+        closeBtn.style.borderRadius = '6px';
+        closeBtn.style.cursor = 'pointer';
+        closeBtn.onclick = () => {
+          selectedNode = null;
+          selectedCategory = null;
+          updateDashboardPanel(null);
+          renderer.refresh();
+        };
+        dashboardPanel.appendChild(closeBtn);
 
-        nodeSelect.addEventListener("change", () => {
-          renderDashboardContent();
+        // Render the pie chart
+        pieChart = new Chart(pieCanvas, {
+          type: 'pie',
+          data: {
+            labels: categories,
+            datasets: [{
+              data: counts,
+              backgroundColor: colors,
+            }]
+          },
+          options: {
+            responsive: false,
+            plugins: {
+              legend: {
+                display: true,
+                position: 'bottom',
+                labels: {
+                  font: {
+                    size: 12
+                  }
+                },
+                onClick: (e, legendItem, legend) => {
+                  selectedCategory = legend.chart.data.labels[legendItem.index];
+                  renderDashboardContent();
+                }
+              },
+              tooltip: {
+                bodyFont: {
+                  size: 12
+                },
+                callbacks: {
+                  label: function(context) {
+                    const label = context.label || '';
+                    const value = context.parsed || 0;
+                    const percent = posts.length > 0 ? ((value / posts.length) * 100).toFixed(1) : "0.0";
+                    return `${label}: ${value} (${percent}%)`;
+                  }
+                }
+              }
+            },
+            onClick: (evt, elements) => {
+              if (elements.length > 0) {
+                const idx = elements[0].index;
+                selectedCategory = categories[idx];
+                renderDashboardContent();
+              }
+            }
+          }
         });
 
+        // For layout, wrap pie chart and posts in a flex container
+        const flexContainer = document.createElement('div');
+        flexContainer.style.display = 'flex';
+        flexContainer.style.flexDirection = 'column';
+        flexContainer.style.justifyContent = 'center';
+        flexContainer.style.alignItems = 'center';
+        flexContainer.style.gap = '40px';
+        flexContainer.style.margin = '60px auto 0 auto';
+        flexContainer.style.maxWidth = '900px';
+        flexContainer.style.width = '90vw';
+        flexContainer.style.minHeight = '60vh';
+        // Move pie chart into flex container
+        flexContainer.appendChild(pieCanvas);
+        // Create posts container
+        const postsContainer = document.createElement('div');
+        postsContainer.style.width = '100%';
+        postsContainer.style.maxWidth = '900px';
+        postsContainer.style.overflowY = 'auto';
+        postsContainer.style.marginTop = '20px';
+        // We'll append the postsHTML here in renderDashboardContent
+        flexContainer.appendChild(postsContainer);
+        dashboardPanel.appendChild(flexContainer);
+
         function renderDashboardContent() {
-          const selectedId = nodeSelect.value;
           let filteredPosts;
-          if (selectedId) {
-            const selectedAttrs = graph.getNodeAttributes(selectedId);
-            const selectedLabel = selectedAttrs.label || selectedId;
-            if (clickedType === "medication") {
-              filteredPosts = posts.filter(post => post.category === selectedLabel);
-            } else {
-              filteredPosts = posts.filter(post => post.category === selectedLabel);
-            }
+          if (selectedCategory) {
+            filteredPosts = posts.filter(post => post.category === selectedCategory);
           } else {
             filteredPosts = posts;
           }
-          let html = `
-            <h4 style=\"margin-top:0\">${nodeName}</h4>
-            <p><strong>Menções únicas:</strong> ${posts.length}<br>
-            <strong>Posts exibidos:</strong> ${filteredPosts.length} de ${posts.length}</p>
-            <p><strong>Posts relacionados:</strong></p>
-            <ul style=\"max-height:120px;overflow:auto;padding-left:18px;\">
-              ${filteredPosts.length > 0 ? filteredPosts.map(post => `<li style=\"margin-bottom:6px;\">${post.content}</li>`).join("") : '<li style=\"color:#888\">Nenhum post encontrado para esta combinação.</li>'}
+          // Add clear filter button if a category is selected
+          let clearFilterBtnHTML = '';
+          if (selectedCategory) {
+            clearFilterBtnHTML = `<button id=\"clearCategoryFilterBtn\" style=\"margin-bottom:18px;padding:8px 16px;font-size:16px;background:#4B89DC;color:white;border:none;border-radius:5px;cursor:pointer;\">Remover filtro</button>`;
+          }
+          let postsHTML = `
+            ${clearFilterBtnHTML}
+            <p style=\"font-size:18px;\"><strong>Posts exibidos:</strong> ${filteredPosts.length} de ${posts.length}</p>
+            <p style=\"font-size:18px;\"><strong>Posts relacionados:</strong></p>
+            <ul style=\"max-height:60vh;overflow:auto;padding-left:18px;font-size:16px;\">
+              ${filteredPosts.length > 0 ? filteredPosts.map((post, idx) => `<li style=\"margin-bottom:16px;\"><span class=\"post-category-link\" data-category=\"${encodeURIComponent(post.category)}\" style=\"font-weight:bold;cursor:pointer;color:#4B89DC;\">(${post.category})</span> ${post.content}</li>`).join("") : '<li style=\"color:#888\">Nenhum post encontrado para esta combinação.</li>'}
             </ul>
           `;
-          dashboardPanel.innerHTML = "";
-          dashboardPanel.appendChild(menuDiv);
-          const contentDiv = document.createElement("div");
-          contentDiv.innerHTML = html;
-          dashboardPanel.appendChild(contentDiv);
+          postsContainer.innerHTML = postsHTML;
           dashboardPanel.style.display = "block";
+          // Add click listeners to category links
+          setTimeout(() => {
+            const links = postsContainer.querySelectorAll('.post-category-link');
+            links.forEach(link => {
+              link.onclick = (e) => {
+                const cat = decodeURIComponent(e.target.getAttribute('data-category'));
+                selectedCategory = cat;
+                renderDashboardContent();
+              };
+            });
+            // Add click listener to clear filter button
+            const clearBtn = document.getElementById('clearCategoryFilterBtn');
+            if (clearBtn) {
+              clearBtn.onclick = () => {
+                selectedCategory = null;
+                renderDashboardContent();
+              };
+            }
+          }, 0);
         }
 
         // Initial render
@@ -329,12 +424,24 @@ document.addEventListener("DOMContentLoaded", () => {
       // Sync menu and click selection
       renderer.on("clickNode", ({ node }) => {
         selectedNode = node;
+        selectedCategory = null; // Reset selection on node click
         updateDashboardPanel(node);
         renderer.refresh();
       });
       renderer.on("clickStage", () => {
         selectedNode = null;
+        selectedCategory = null;
         updateDashboardPanel(null);
+        renderer.refresh();
+      });
+
+      // --- Highlight connections on hover ---
+      renderer.on("enterNode", ({ node }) => {
+        hoveredNode = node;
+        renderer.refresh();
+      });
+      renderer.on("leaveNode", ({ node }) => {
+        hoveredNode = null;
         renderer.refresh();
       });
 
